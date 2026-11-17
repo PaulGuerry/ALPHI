@@ -1,0 +1,11 @@
+__pycache__/
+.venv/
+.env
+*:Zone.Identifier
+phenotype.hpoa
+phenotype.hpoa.ic.json
+# outputs of alphi.py (one folder per run: YYMMDD_GENES_SYSTEM_PAIRS)
+[0-9][0-9][0-9][0-9][0-9][0-9]_*/
+# built by web/build.sh
+web/core/
+web/manifest.json

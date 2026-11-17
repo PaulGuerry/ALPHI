@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ALPHI</title>
+<style>
+:root{--bg:#fbfbfa;--panel:#fff;--ink:#1f1f1e;--muted:#6b6b67;--line:#e4e3df;--accent:#1c5cab;--warn:#a5521b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--panel:#1f1f1e;--ink:#ecebe7;--muted:#a3a29d;--line:#33332f;--accent:#6ea3e6;--warn:#e0965c}}
+:root[data-theme="dark"]{--bg:#161615;--panel:#1f1f1e;--ink:#ecebe7;--muted:#a3a29d;--line:#33332f;--accent:#6ea3e6;--warn:#e0965c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:17px;margin:0 0 12px}
+.sub{color:var(--muted);margin:0 0 24px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
+label{display:block;margin:8px 0}
+input[type=number],input[type=text]{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+input[type=number]{width:90px}input[type=text]{width:min(420px,100%)}
+.row{display:flex;flex-wrap:wrap;gap:8px 24px}
+.genes{display:flex;flex-wrap:wrap;gap:6px 16px;max-height:160px;overflow:auto}
+button{font:inherit;font-weight:600;background:var(--accent);color:#fff;border:0;border-radius:8px;padding:9px 18px;cursor:pointer}
+button:disabled{opacity:.45;cursor:default}
+button.secondary{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+.muted{color:var(--muted)}.warn{color:var(--warn)}
+pre{max-height:320px;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;font-size:12px;white-space:pre-wrap}
+details summary{cursor:pointer;color:var(--muted)}
+#plot svg{width:100%;height:auto;display:block}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.card{border:1px solid var(--line);border-radius:8px;padding:12px}
+.card h3{margin:0 0 6px;font-size:15px;display:flex;align-items:center;gap:8px}
+.dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+table{border-collapse:collapse;width:100%;font-size:13px}
+td,th{padding:3px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+td.n,th.n{text-align:right;white-space:nowrap}
+.tip{position:fixed;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:12px;display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>ALPHI</h1>
+<p class="sub">Agnostic latent phenotype identification: groups patients described by Human Phenotype Ontology terms, without diagnostic labels. Everything runs in this browser tab; the patient data are not sent anywhere.</p>
+
+<section>
+<h2>1. Patients</h2>
+<input type="file" id="file" accept=".json,.csv,.tsv,.txt">
+<p class="muted" style="font-size:13px">JSON in the PytheasDB / ALPHI format (a list of patients with <code>id</code>, <code>gene</code> and <code>symptoms</code>), or a CSV/TSV table with columns <code>id</code>, <code>hpo</code> (HPO codes separated by <code>;</code>), and optionally <code>gene</code>, <code>status</code> (alive/dead) and <code>age</code> (years, at death or last news).</p>
+<div id="fileinfo"></div>
+</section>
+
+<section>
+<h2>2. Options</h2>
+<div class="row">
+<label>Minimum HPO terms per patient <input type="number" id="minsym" value="5" min="1"></label>
+<label>Stability resamples <input type="number" id="stab" value="50" min="0" max="200"></label>
+</div>
+<label><input type="checkbox" id="lca" checked> Latent class check (ALPHI; untick for ALPHI-OB)</label>
+<label><input type="checkbox" id="uncertain"> Exclude patients with more than one candidate gene</label>
+<label>Exclude the patients of one article (DOI) <input type="text" id="doi" placeholder="https://doi.org/…"></label>
+</section>
+
+<section>
+<div class="row" style="align-items:center">
+<button id="run" disabled>Run ALPHI</button>
+<span id="status" class="muted">Loading…</span>
+</div>
+<details style="margin-top:12px"><summary>Log</summary><pre id="log"></pre></details>
+</section>
+
+<section id="results" hidden>
+<h2>Results</h2>
+<p id="summary"></p>
+<div id="plot"></div>
+<p class="muted" style="font-size:13px">Two-dimensional UMAP of the distances between patients, for display only: the groups were found in a higher-dimensional embedding.</p>
+<div class="cards" id="cards"></div>
+<div class="row" style="margin-top:16px">
+<button id="dlzip" class="secondary">Download all outputs (zip)</button>
+<button id="dlcsv" class="secondary">Download groups (CSV)</button>
+</div>
+</section>
+<div class="tip" id="tip"></div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

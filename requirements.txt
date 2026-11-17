@@ -1,0 +1,10 @@
+numpy
+scipy
+pandas
+scikit-learn
+umap-learn==0.5.12
+hdbscan==0.8.44
+lifelines
+orjson
+tqdm
+tabulate
