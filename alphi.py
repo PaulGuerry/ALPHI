@@ -176,6 +176,81 @@ def resolve_resource(name: str) -> str:
 MAPPING_JSON_PATH = resolve_resource("id_to_term.json")
 
 
+# ==========================================
+# SOURCE ARTICLES OF A PATIENT RECORD
+# ==========================================
+def patient_articles(patient_entry: dict) -> list:
+    """
+    Source articles of a patient as a list of {"doi", "publication_year", "patient"} dicts.
+    PytheasDB exports keep them in an "articles" list; older patient files had top-level
+    "doi" (str or list), "publication_year" and "patients" fields, which are used when
+    "articles" is absent.
+    """
+    arts = [a for a in patient_entry.get("articles") or [] if isinstance(a, dict)]
+    if arts:
+        return arts
+    dois = patient_entry.get("doi") or []
+    dois = dois if isinstance(dois, list) else [dois]
+    year, label = patient_entry.get("publication_year"), patient_entry.get("patients", "")
+    if not dois and year is None:
+        return []
+    return [{"doi": d, "publication_year": year, "patient": label} for d in (dois or [""])]
+
+def patient_dois(patient_entry: dict) -> list:
+    """All non-empty DOIs of a patient, in the order of its articles."""
+    return [str(a["doi"]).strip() for a in patient_articles(patient_entry) if a.get("doi") and str(a["doi"]).strip()]
+
+def patient_first_doi(patient_entry: dict) -> str:
+    """DOI of the patient's first listed article ('' if none)."""
+    dois = patient_dois(patient_entry)
+    return dois[0] if dois else ""
+
+def patient_label(patient_entry: dict) -> str:
+    """Label of the patient in its first listed article ('' if none)."""
+    arts = patient_articles(patient_entry)
+    return str(arts[0].get("patient") or "") if arts else ""
+
+def patient_pub_year(patient_entry: dict):
+    """Earliest known publication year among the patient's articles (None if none)."""
+    years = []
+    for a in patient_articles(patient_entry):
+        try:
+            years.append(int(a.get("publication_year")))
+        except (TypeError, ValueError):
+            pass
+    return min(years) if years else None
+
+def check_patient_fields(patient_list, selected_ids, excluded_doi=None):
+    """
+    Reports how many selected patients carry the fields read after clustering (source
+    article DOI and year, survival status and age) and how many records the excluded DOI
+    matches. A renamed or reformatted field would otherwise fail silently: empty DOI
+    columns, no article counts, no Cox models, no survival analysis, no exclusion.
+    """
+    lookup = {p.get("id"): p for p in patient_list}
+    sel = [lookup[i] for i in selected_ids if i in lookup]
+    n = len(sel)
+    counts = {
+        "DOI": sum(bool(patient_first_doi(p)) for p in sel),
+        "publication year": sum(patient_pub_year(p) is not None for p in sel),
+        "survival status and age": sum(parse_survival_data(p)[0] is not None for p in sel),
+    }
+    print("Record fields: " + ", ".join(f"{k} for {v}/{n}" for k, v in counts.items()) + " selected patients.")
+    missing = [field for field, v in counts.items() if n and v == 0]
+    if missing:
+        print(f"  [WARNING] No {' / '.join(missing)} found in any selected record: the analyses that use "
+              "them will be empty or skipped. ALPHI expects an 'articles' list of {\"doi\", "
+              "\"publication_year\", \"patient\"} dicts (or top-level 'doi' and 'publication_year') and "
+              "'alivedead' / 'alivedeadage'. Check the patient file's format.")
+    if excluded_doi:
+        norm = normalize_doi(excluded_doi)
+        n_match = sum(norm in [normalize_doi(d) for d in patient_dois(p)] for p in patient_list)
+        print(f"  Excluded DOI matches {n_match} record(s) in the patient file.")
+        if n_match == 0:
+            print("  [WARNING] The excluded DOI matches no record, so nothing was excluded. "
+                  "Check the DOI or the patient file's format.")
+
+
 def parse_survival_data(patient_entry: dict):
     """
     Parses 'alivedead' status and 'alivedeadage' duration from patient records.
@@ -300,11 +375,8 @@ def evaluate_cox_ph_model(df_transformed: pd.DataFrame, patient_lookup: dict, cl
         duration, event = parse_survival_data(patient_entry)
 
         # Parse publication year
-        pub_year = patient_entry.get("publication_year")
-        try:
-            pub_year_val = float(pub_year) if pub_year is not None else np.nan
-        except (ValueError, TypeError):
-            pub_year_val = np.nan
+        pub_year = patient_pub_year(patient_entry)
+        pub_year_val = float(pub_year) if pub_year is not None else np.nan
 
         if duration is not None and event is not None and not np.isnan(pub_year_val):
             cox_records.append({
@@ -401,11 +473,8 @@ def evaluate_cox_ph_model_continuous(df_transformed: pd.DataFrame, patient_looku
         duration, event = parse_survival_data(patient_entry)
 
         # Parse publication year
-        pub_year = patient_entry.get("publication_year")
-        try:
-            pub_year_val = float(pub_year) if pub_year is not None else np.nan
-        except (ValueError, TypeError):
-            pub_year_val = np.nan
+        pub_year = patient_pub_year(patient_entry)
+        pub_year_val = float(pub_year) if pub_year is not None else np.nan
 
         if duration is not None and event is not None and not np.isnan(pub_year_val):
             cox_records.append({
@@ -1185,17 +1254,9 @@ def export_eligible_clusters_to_json(
             for pid in cluster_patient_ids:
                 p_entry = patient_lookup.get(pid, {})
 
-                # Extract first DOI element
-                doi_val = p_entry.get("doi", [])
-                if isinstance(doi_val, list) and len(doi_val) > 0:
-                    first_doi = doi_val[0]
-                elif isinstance(doi_val, str):
-                    first_doi = doi_val
-                else:
-                    first_doi = ""
-
-                # extract 'patients' string descriptor
-                patients_label = str(p_entry.get("patients", ""))
+                # DOI of the first listed article, and the patient's label in it
+                first_doi = patient_first_doi(p_entry)
+                patients_label = patient_label(p_entry)
 
                 # Extract and format gene(s) as a comma-separated string
                 gene_val = p_entry.get("gene", [])
@@ -1640,14 +1701,8 @@ def select_patient_cohort(patient_list, sel_genes, excluded_doi=None, exclude_un
             continue
 
         if norm_excluded_doi:
-            patient_doi = entry.get("doi", [])
-            if isinstance(patient_doi, list):
-                norm_patient_dois = [normalize_doi(d) for d in patient_doi]
-                if norm_excluded_doi in norm_patient_dois:
-                    continue
-            elif isinstance(patient_doi, str):
-                if norm_excluded_doi == normalize_doi(patient_doi):
-                    continue
+            if norm_excluded_doi in [normalize_doi(d) for d in patient_dois(entry)]:
+                continue
 
         patient_genes = entry["gene"]
         
@@ -1739,21 +1794,14 @@ def evaluate_cluster_phenotypic_coherence(df_transformed, patient_lookup, tree_l
             patient_symptom_sets.append(symptoms)
             patient_symptom_counts.append(len(symptoms))
 
-            doi_val = patient_entry.get("doi", [])
-            pub_year = patient_entry.get("publication_year")
-
-            try:
-                pub_year_int = int(pub_year) if pub_year is not None else None
-            except (ValueError, TypeError):
-                pub_year_int = None
-
-            if isinstance(doi_val, list):
-                for single_doi in doi_val:
-                    if single_doi and single_doi not in article_year_map:
-                        article_year_map[single_doi] = pub_year_int
-            elif isinstance(doi_val, str) and doi_val.strip():
-                if doi_val not in article_year_map:
-                    article_year_map[doi_val] = pub_year_int
+            for art in patient_articles(patient_entry):
+                single_doi = str(art.get("doi") or "").strip()
+                if not single_doi or article_year_map.get(single_doi) is not None:
+                    continue
+                try:
+                    article_year_map[single_doi] = int(art.get("publication_year"))
+                except (TypeError, ValueError):
+                    article_year_map[single_doi] = None
 
         article_years = [year for year in article_year_map.values() if year is not None]
         article_years.sort()
@@ -2295,6 +2343,7 @@ def main():
     )
     n_cohort = len(selected_ids)
     print(f"Cohort filtering complete. Selected {n_cohort} matching patients.")
+    check_patient_fields(patient_list, selected_ids, excluded_doi)
 
     pair_combinations = list(combinations(selected_ids, 2))
     total_combos = len(pair_combinations)
@@ -2403,7 +2452,7 @@ def main():
 
     ids = pd.Series(selected_ids)
     symptomslist = [len(set(extract_symptom_codes(patient_lookup[sid]["symptoms"]))) for sid in ids]
-    doilist = [patient_lookup[sid].get("doi", None) for sid in ids]
+    doilist = [patient_first_doi(patient_lookup[sid]) for sid in ids]
     geneslist = [patient_lookup[sid].get("gene", None) for sid in ids]
 
     if args.no_embedding and args.gridsearch != 1:
